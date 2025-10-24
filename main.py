@@ -4,132 +4,75 @@ import requests
 import pandas as pd
 from mysql import connector
 from dotenv import load_dotenv
+import psycopg2
+from psycopg2.extras import execute_batch
 
+# Load environment variables
 load_dotenv()
 
+# PostgreSQL Config
+PG_HOST = os.getenv("PG_HOST")
+PG_PORT = os.getenv("PG_PORT")
+PG_USER = os.getenv("PG_USER")
+PG_PASSWORD = os.getenv("PG_PASSWORD")
+PG_DATABASE = os.getenv("PG_DATABASE")
+
+# API Config
 API_KEY = os.getenv("API_KEY")
-API_HOST = os.getenv("API_HOST")
 API_SECRET = os.getenv("API_SECRET")
-SEASON = 2025
-LEAGUE_ID = 5
-print(API_KEY)
 
-# url = f"https://livescore-api.com/api-client/leagues/table.json?competition_id={LEAGUE_ID}&key={API_KEY}&secret={API_SECRET}"
-url = f"https://livescore-api.com/api-client/leagues/table.json?key={API_KEY}&secret={API_SECRET}&competition_id={LEAGUE_ID}&include_form=1"
-headers = {"x-rapidapi-key": API_KEY, "x-rapidapi-host": API_HOST}
-
-# https://livescore-api.com/api-client/leagues/table.json?competition_id=2&key=jAgOFcvg5LCvM1zm&secret=vTsEc5W4cHdOTPCdqS165wnaiZG41frw
-
-querystring = {"league": LEAGUE_ID, "season": SEASON}
-print(querystring)
-
-
-response = requests.get(url=url)
-
-payload = response.json()
-payload
-
-formatted_response = json.dumps(payload, indent=4)
-
-print(formatted_response)
-
-standings_list = payload["data"]["table"]
-formatted_standings = json.dumps(standings_list, indent=4)
-print(formatted_standings)
-
-arseille_points = standings_list[0]["points"]
-print(arseille_points)
-
-
-rows = []
-column_names = [
-    "season",
-    "position",
-    "team__id",
-    "team",
-    "played",
-    "won",
-    "draw",
-    "lost",
-    "goals_for",
-    "goals_against",
-    "goal_diff",
-    "points",
-    "form",
+# Leagues
+LEAGUE_INFO = [
+    {"league_id": 5, "league_name": "Ligue 1", "country": "France"},
+    {"league_id": 2, "league_name": "Premier League", "country": "England"},
+    {"league_id": 3, "league_name": "LaLiga Santander", "country": "Spain"},
 ]
-for club in standings_list:
-    season = 2025
-    position = club["rank"]
-    team_id = club["team_id"]
-    team = club["name"]
-    played = club["matches"]
-    won = club["won"]
-    draw = club["drawn"]
-    lost = club["lost"]
-    goals_for = club["goals_scored"]
-    goals_against = club["goals_conceded"]
-    goal_diff = club["goal_diff"]
-    points = club["points"]
-    form = "LLDDWW"
 
-    tuple_of_club_records = (
-        season,
-        position,
-        team_id,
-        team,
-        played,
-        won,
-        draw,
-        lost,
-        goals_for,
-        goals_against,
-        goal_diff,
-        points,
-        form,
+LEAGUE_INFO[0]["league_id"]
+
+
+# Connect to PostgresSql
+def get_db_connection():
+    return psycopg2.connect(
+        database=PG_DATABASE,
+        user=PG_USER,
+        password=PG_PASSWORD,
+        host=PG_HOST,
+        port=PG_PORT,
     )
-    rows.append(tuple_of_club_records)
 
 
-df = pd.DataFrame(rows, columns=column_names)
-df.head(18)
-
-df.info()
-
-MYSQL_HOST = os.getenv("MYSQL_HOST")
-MYSQL_PORT = os.getenv("MYSQL_PORT")
-MYSQL_USER = os.getenv("MYSQL_USER")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
-print(MYSQL_USER)
-
-
-import psycopg2
-
-# server_conn = connector.connect(
-#     host = MYSQL_HOST,
-#     port = MYSQL_PORT,
-#     user = MYSQL_USER,
-#     password = MYSQL_PASSWORD,
-#     # connection_timeout = 10,
-#     autocommit = False,
-#     raise_on_warning=True
-# )
-
-try:
-    server_conn = psycopg2.connect(
-        database=MYSQL_DATABASE,
-        host=MYSQL_HOST,
-        port=MYSQL_PORT,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
+# fetch league data
+def fetch_league_standings(league_id, league_name):
+    url = (
+        f"https://livescore-api.com/api-client/leagues/table.json?"
+        f"key={API_KEY}&secret={API_SECRET}&competition_id={league_id}&include_form=1"
     )
-    server_conn
-    # Open a cursor to perform database operations
-    cur = server_conn.cursor()
 
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data.get("success"):
+            print(f"API returned error for {league_name}: {data}")
+            return None
+        print(f"{league_name}: fetched {len(data['data']['table'])} teams")
+        # print(data["data"]["table"])
+        return data["data"]["table"]
+
+    except Exception as e:
+        print(f"Error fetching {league_name}: {e}")
+        return None
+
+
+# Create league table if not exists
+
+
+def create_table_if_not_exists(cur, table_name):
     cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS standings_ligue_1(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name}(
         id SERIAL,
         season INT NOT NULL,
         position INT NOT NULL,
@@ -150,92 +93,77 @@ try:
 
         """
     )
-    print("Connection to PostgresSQL succesfull!")
-
-    sql_table = "standings_ligue_1"
-    cur.execute(
-        """
-    SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = %s
-    )
-    """,
-        (sql_table,),
-    )
-
-    exists = cur.fetchone()[0]
-
-    if not exists:
-        raise SystemExit(
-            f"❌ This table '{sql_table}' is NOT found... please create it."
-        )
-    else:
-        print(f"✅ This table '{sql_table}' exists!")
-
-except Exception as e:
-    print("connection failed!", e)
+    print(f"Table '{table_name}' ready.")
 
 
-# finally:
-#     if server_conn:
-#         # make the changes to the database persistent
-#         server_conn.commit()
-#         # close cursor and communication with the database
-#         cur.close()
-#         server_conn.close()
+# Upsert Data
+def upsert_standings(cur, table_name, records):
+    UPSERT_SQL = f"""
+        INSERT INTO {table_name}
+        (season, position, team_id, team, played, won, draw, lost,
+         goals_for, goals_against, goal_diff, points, form)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (season, team_id) DO UPDATE SET
+            position = EXCLUDED.position,
+            team = EXCLUDED.team,
+            played = EXCLUDED.played,
+            won = EXCLUDED.won,
+            draw = EXCLUDED.draw,
+            lost = EXCLUDED.lost,
+            goals_for = EXCLUDED.goals_for,
+            goals_against = EXCLUDED.goals_against,
+            goal_diff = EXCLUDED.goal_diff,
+            points = EXCLUDED.points,
+            form = EXCLUDED.form;
+    """
+    execute_batch(cur, UPSERT_SQL, records)
+    print(f"✅ Upserted {len(records)} rows into '{table_name}'")
 
-table_cols = [
-    "season",
-    "position",
-    "team__id",
-    "team",
-    "played",
-    "won",
-    "draw",
-    "lost",
-    "goals_for",
-    "goals_against",
-    "goal_diff",
-    "points",
-    "form",
-]
 
-standing_df = df[table_cols]
+def main():
+    with get_db_connection() as conn:
+        cur = conn.cursor()
 
-standings_records_tuples = standing_df.itertuples(index=False, name=None)
+        for league in LEAGUE_INFO:
+            league_id = league["league_id"]
+            league_name = league["league_name"]
+            table_name = f"standings_{league_name.replace(' ', '_').lower()}"
 
-list_of_standings_records_tuples = list(standings_records_tuples)
+            standings = fetch_league_standings(league_id, league_name)
+            if not standings:
+                continue
 
-UPSERT_SQL = f"""
-INSERT INTO {sql_table}
-(season, position, team_id, team, played, won, draw, lost, goals_for, goals_against, goal_diff, points, form)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-ON CONFLICT (season, team_id) DO UPDATE SET
-position = EXCLUDED.position,
-team = EXCLUDED.team,
-played = EXCLUDED.played,
-won = EXCLUDED.won,
-draw = EXCLUDED.draw,
-lost = EXCLUDED.lost,
-goals_for = EXCLUDED.goals_for,
-goals_against = EXCLUDED.goals_against,
-goal_diff = EXCLUDED.goal_diff,
-points = EXCLUDED.points,
-form = EXCLUDED.form;
-"""
+            create_table_if_not_exists(cur, table_name)
 
-no_of_rows_uploaded_to_mysql = len(list_of_standings_records_tuples)
-
-try:
-    cur.executemany(UPSERT_SQL, list_of_standings_records_tuples)
-    server_conn.commit()
-    print(f"[SUCCESS] - Upsert attempted for {no_of_rows_uploaded_to_mysql} rows!")
-
-except Exception as e:
-    server_conn.rollback()
-    print(f"[ERROR] - ROlled back due to this...: {e}")
-finally:
+            # Prepare records
+            records = [
+                (
+                    2025,
+                    int(team["rank"]),
+                    int(team["team_id"]),
+                    team["name"],
+                    int(team["matches"]),
+                    int(team["won"]),
+                    int(team["drawn"]),
+                    int(team["lost"]),
+                    int(team["goals_scored"]),
+                    int(team["goals_conceded"]),
+                    int(team["goal_diff"]),
+                    int(team["points"]),
+                    "".join(team.get("form", [])) if team.get("form") else "WWDDLL",
+                )
+                for team in standings
+            ]
+            # Upsert into DB
+            upsert_standings(cur, table_name, records)
+            conn.commit()
     cur.close()
-    server_conn.close()
-    print("All database connection was closed. \n\nClean up completed.")
+    print("Connection closed")
+    print("All leagues processed successfully")
+
+
+# -----------------------------------
+# Entry point
+# -----------------------------------
+if __name__ == "__main__":
+    main()
