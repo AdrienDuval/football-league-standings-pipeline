@@ -1,7 +1,6 @@
 # 🏟️ Football League Standings Data Pipeline  
-
-> End-to-end **Data Engineering pipeline** fetching, transforming, and storing real-time football league standings from multiple European leagues using **Python**, **PostgreSQL**, and the **LiveScore API**.  
-> Designed to optimize data infrastructure for sports venues and demonstrate advanced ETL and database engineering practices.
+End-to-end **Data Engineering pipeline** fetching, transforming, and storing real-time football league standings from multiple European leagues using **Python**, **PostgreSQL**, and the **LiveScore API**.  
+Designed to optimize data infrastructure for sports venues and demonstrate advanced ETL and database engineering practices.
 
 ![Pipeline Overview](assets/pipeline_overview.png)
 
